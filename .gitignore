@@ -1,0 +1,24 @@
+venv/
+.env
+__pycache__/
+*.pyc
+.DS_Store
+
+# HuggingFace model cache
+huggingface/
+cache/
+hf_cache/
+~/.cache/
+
+# SentenceTransformer cache
+sentence-transformers/
+
+# Tokenizer cache
+tokenizers/
+
+# Large embeddings
+*.bin
+*.safetensors
+
+# macOS files
+.DS_Store
