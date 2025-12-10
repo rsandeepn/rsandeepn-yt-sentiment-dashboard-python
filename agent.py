@@ -1,6 +1,7 @@
 # agent.py
 import os
 
+# Reduce warnings / thread issues
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -11,13 +12,17 @@ os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 import re
 from collections import Counter
 
+import spacy
+nlp = spacy.load("en_core_web_sm", disable=["ner", "parser"])  # faster noun-chunking
+
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import KMeans
 
 from sentiment_model import classify_sentiment_batch
 from youtube_client import fetch_comments, extract_video_id
 
-EXAMPLE_LIMIT = 15  # how many example comments to show per cluster
+
+EXAMPLE_LIMIT = 15  # examples per cluster
 
 
 # ---------------------------------------------------------
@@ -29,11 +34,13 @@ embedder = SentenceTransformer(
 
 
 def clean_text(x: str) -> str:
+    """Normalize whitespace and strip markup."""
+    x = re.sub(r"<.*?>", "", x)
     return re.sub(r"\s+", " ", x).strip()
 
 
 # ---------------------------------------------------------
-# Cluster comments into meaning groups
+# CLUSTER COMMENTS
 # ---------------------------------------------------------
 def cluster_and_summarize(comments, num_clusters: int = 6):
     if len(comments) == 0:
@@ -54,7 +61,6 @@ def cluster_and_summarize(comments, num_clusters: int = 6):
 
     clusters = {}
     for idx, label in enumerate(labels):
-        # Cast label to string so it's JSON-safe
         key = str(int(label))
         clusters.setdefault(key, []).append(comments[idx])
 
@@ -62,12 +68,13 @@ def cluster_and_summarize(comments, num_clusters: int = 6):
     for key, group in clusters.items():
         result[key] = {
             "summary": summarize_cluster_meaning(group),
-            "examples": group[:EXAMPLE_LIMIT],
+            "examples": group[:EXAMPLE_LIMIT]
         }
     return result
 
 
 def summarize_cluster_meaning(comments):
+    """Pick the longest comment as the cluster representative."""
     if not comments:
         return "No insights."
 
@@ -76,149 +83,183 @@ def summarize_cluster_meaning(comments):
 
 
 # ---------------------------------------------------------
-# Simple keyword extraction for overview
+# IMPROVED KEYWORD EXTRACTION (USING SPACY NOUN FILTERING)
 # ---------------------------------------------------------
-STOPWORDS = {
-    "the",
-    "and",
-    "for",
-    "this",
-    "that",
-    "with",
-    "have",
-    "from",
-    "your",
-    "you",
-    "movie",
-    "video",
-    "song",
-    "very",
-    "just",
-    "like",
-    "here",
+REMOVE_POS = {"PRON", "DET", "AUX", "CCONJ", "SCONJ", "ADV", "VERB"}
+REMOVE_WORDS = {
+    "the","and","for","this","that","with","have","from","your","you",
+    "very","just","like","here","please","thanks","thank","thank you",
+    "will","should","could","would","how","what","why","when","where",
+    "do","does","did","is","am","are","was","were","be","been","being",
+    "next","time","want","i","me","my","we","our","they","their","he",
+    "she","it","a","an","to","but","not","his","her","its"
 }
 
 
 def extract_keywords(texts, top_k: int = 10):
-    words = []
-    for t in texts:
-        t = t.lower()
-        t = re.sub(r"[^a-zA-Z0-9\u0C00-\u0C7F\u0B80-\u0BFF\u0900-\u097F]+", " ", t)
-        tokens = t.split()
-        for tok in tokens:
-            if len(tok) <= 2:
+    """Extracts clean nouns from comments using spaCy."""
+    all_nouns = []
+
+    for text in texts:
+        text = text.strip().lower()
+        doc = nlp(text)
+
+        for tok in doc:
+            if len(tok.text) <= 2:
                 continue
-            if tok in STOPWORDS:
+            if tok.text in REMOVE_WORDS:
                 continue
-            words.append(tok)
-    if not words:
+            if tok.pos_ in REMOVE_POS:
+                continue
+            all_nouns.append(tok.text)
+
+    if not all_nouns:
         return []
-    freq = Counter(words)
+
+    freq = Counter(all_nouns)
     return [w for w, _ in freq.most_common(top_k)]
 
 
 # ---------------------------------------------------------
-# Build high-level overview (4–5 sentences)
+# Detect viewer suggestions
 # ---------------------------------------------------------
-def build_short_overview(all_items, positives, negatives, neutrals):
+SUGGESTION_PHRASES = [
+    "should", "please", "i think you", "you need to", "you must",
+    "can you", "could you", "would be better", "need more", "do more",
+    "make more", "next time", "try to", "improve", "improvement",
+    "suggest", "my suggestion", "request", "please upload", "pls upload",
+    "do a video on"
+]
+
+# ---------------------------------------------------------
+# Stopwords for theme keyword extraction
+# ---------------------------------------------------------
+SUGGESTION_STOPWORDS = [
+    "the","and","for","this","that","with","have","from","your","you","very",
+    "just","like","here","please","thanks","thank","thank you","will","how",
+    "should","can","could","would","need","make","more","do","did","does",
+    "is","am","are","was","were","be","been","being","next","time","want",
+    "i","me","my","we","our","they","their","he","she","it","a","an","to",
+    "but","what","who","why","when","where"
+]
+
+
+
+def is_suggestion(text: str) -> bool:
+    t = text.lower()
+    if len(t) < 15:
+        return False
+    return any(phrase in t for phrase in SUGGESTION_PHRASES)
+
+
+def detect_suggestions(all_items):
+    return [item for item in all_items if is_suggestion(item["text"])]
+
+
+def build_suggestions_overview(suggestions):
+    if not suggestions:
+        return "No clear suggestions or improvement requests were found."
+
+    texts = [s["text"] for s in suggestions]
+    keywords = extract_keywords(texts, top_k=8)
+    keywords_fmt = ", ".join(keywords[:5]) if keywords else "various content improvements"
+
+    return (
+        f"There are {len(suggestions)} viewer suggestions. "
+        f"Common themes include: {keywords_fmt}. "
+        "These suggestions help improve future videos by highlighting what viewers want."
+    )
+
+
+# ---------------------------------------------------------
+# Build short overview
+# ---------------------------------------------------------
+def build_short_overview(all_items, positives, negatives, neutrals, suggestions):
     total = len(all_items)
     pos = len(positives)
     neg = len(negatives)
     neu = len(neutrals)
+    sug = len(suggestions)
 
     if total == 0:
         return "There are no comments available for this video yet."
 
+    # Mood logic
     if pos > neg * 1.5:
         mood = "mostly positive"
     elif neg > pos * 1.5:
         mood = "mostly negative"
     else:
-        mood = "mixed, with both positive and negative opinions"
+        mood = "mixed"
 
-    keywords = extract_keywords([c["text"] for c in all_items], top_k=8)
-    topics_text = ", ".join(keywords[:5]) if keywords else "various topics"
+    # Clean topic extraction
+    keywords = extract_keywords([c["text"] for c in all_items])
+    topic_str = ", ".join(keywords[:5]) if keywords else "various topics"
 
-    overview_lines = [
-        f"Viewers left {total} comments on this video.",
-        f"The overall mood of the comment section is {mood}.",
-        f"People frequently talk about {topics_text}.",
-        "Many positive comments appreciate aspects like performance, presentation, or emotional impact.",
-        "Negative comments usually focus on expectations, pacing, certain scenes, or dislike for specific elements.",
-    ]
+    overview = (
+        f"Viewers left {total} comments. "
+        f"The overall mood is {mood}. "
+        f"People frequently talk about {topic_str}. "
+        "Positive comments appreciate performance, clarity, or presentation. "
+        "Negative comments focus on expectations or pacing. "
+    )
 
-    return " ".join(overview_lines)
+    if sug > 0:
+        overview += f"Additionally, {sug} viewers provided improvement suggestions."
+
+    return overview
 
 
 # ---------------------------------------------------------
-# Existing long summary (kept)
+# FULL SUMMARY (Markdown)
 # ---------------------------------------------------------
-def build_overall_summary(texts, sentiments, pos_clusters, neg_clusters, neu_count):
+def build_overall_summary(texts, sentiments, pos_clusters, neg_clusters, neu_count, suggestions):
     total = len(texts)
     pos = sum(1 for s in sentiments if s["sentiment"] == "positive")
     neg = sum(1 for s in sentiments if s["sentiment"] == "negative")
     neu = sum(1 for s in sentiments if s["sentiment"] == "neutral")
+    sug = len(suggestions)
 
-    if total == 0:
-        pos_ratio = neg_ratio = neu_ratio = 0.0
-    else:
-        pos_ratio = round(pos / total * 100, 1)
-        neg_ratio = round(neg / total * 100, 1)
-        neu_ratio = round(neu / total * 100, 1)
-
-    if pos > neg * 1.5:
-        mood = "The overall viewer reaction is strongly positive 🎉"
-    elif neg > pos * 1.5:
-        mood = "The overall viewer reaction is mostly negative 😕"
-    else:
-        mood = "The comments show a mix of positive and negative opinions 🤔"
+    pos_pct = round((pos / total) * 100, 1) if total else 0
+    neg_pct = round((neg / total) * 100, 1) if total else 0
+    neu_pct = round((neu / total) * 100, 1) if total else 0
 
     summary = f"""
-### 🧠 **HIGH-LEVEL SUMMARY OF ALL COMMENTS**
+### 🧠 High-Level Summary
 
-- Total comments analyzed: **{total}**
-- Positive: **{pos}** ({pos_ratio}%)
-- Negative: **{neg}** ({neg_ratio}%)
-- Neutral: **{neu}** ({neu_ratio}%)
-
-**Overall mood:** {mood}
+Total Comments: **{total}**
+Positive: **{pos}** ({pos_pct}%)
+Negative: **{neg}** ({neg_pct}%)
+Neutral: **{neu}** ({neu_pct}%)
+Suggestions: **{sug}**
 
 ---
 
-### ⭐ **Positive Themes (summarized):**
+### ⭐ Positive Themes
 """
+    for v in pos_clusters.values():
+        summary += f"- {v['summary']}\n"
 
-    if pos_clusters:
-        for v in pos_clusters.values():
-            summary += f"- {v['summary']}\n"
-    else:
-        summary += "- No major positive sentiment detected.\n"
-
-    summary += """
-
-### ⚠️ **Negative Themes (summarized):**
-"""
-
-    if neg_clusters:
-        for v in neg_clusters.values():
-            summary += f"- {v['summary']}\n"
-    else:
-        summary += "- No major negative sentiment detected.\n"
+    summary += "\n### ⚠️ Negative Themes\n"
+    for v in neg_clusters.values():
+        summary += f"- {v['summary']}\n"
 
     summary += f"""
 
-### 😐 **Neutral Observations:**
-- Viewers shared {neu_count} neutral or informational comments.
-- These usually include general statements, jokes, or unrelated chat.
-
----
+### 😐 Neutral Observations
+- {neu_count} neutral or informational comments.
 
 """
+
+    summary += "\n### 💡 Viewer Suggestions & Requests\n"
+    for s in suggestions[:10]:
+        summary += f"- {s['text']}\n"
+
     return summary
 
 
 # ---------------------------------------------------------
-# Main: analyze full YouTube comments
+# MAIN ENTRY
 # ---------------------------------------------------------
 def analyze_comments(video_url: str):
     print("📥 Fetching comments...")
@@ -243,25 +284,98 @@ def analyze_comments(video_url: str):
     negatives = [c for c in all_items if c["sentiment"] == "negative"]
     neutrals = [c for c in all_items if c["sentiment"] == "neutral"]
 
+    # 🔍 Suggestion-style comments
+    suggestions = detect_suggestions(all_items)
+
     print("🔍 Clustering positive comments...")
     pos_clusters = cluster_and_summarize([c["text"] for c in positives], num_clusters=6)
 
     print("🔍 Clustering negative comments...")
     neg_clusters = cluster_and_summarize([c["text"] for c in negatives], num_clusters=6)
 
-    short_overview = build_short_overview(all_items, positives, negatives, neutrals)
-    long_summary = build_overall_summary(texts, sentiment_results, pos_clusters, neg_clusters, len(neutrals))
+    # ------------------------------
+    # NEW THEME OVERVIEW
+    # ------------------------------
+    theme_overview = {
+        "positive": summarize_theme_overview(pos_clusters, "positive"),
+        "negative": summarize_theme_overview(neg_clusters, "negative"),
+        "neutral": summarize_theme_overview(
+            {"neutral": [n["text"] for n in neutrals]},
+            "neutral"
+        )
+    }
 
+    # ------------------------------
+    # Summaries
+    # ------------------------------
+    short_overview = build_short_overview(
+        all_items, positives, negatives, neutrals, suggestions
+    )
+
+    long_summary = build_overall_summary(
+        texts,
+        sentiment_results,
+        pos_clusters,
+        neg_clusters,
+        len(neutrals),
+        suggestions,
+    )
+
+    suggestions_overview = build_suggestions_overview(suggestions)
+
+    # ------------------------------
+    # FINAL RETURN OBJECT
+    # ------------------------------
     return {
-        "overview": short_overview,          # 4–5 simple sentences
-        "summary": long_summary,             # existing markdown-style block
+        "overview": short_overview,
+        "summary": long_summary,
         "positive_clusters": pos_clusters,
         "negative_clusters": neg_clusters,
+
+        "theme_overview": theme_overview,
+
         "stats": {
             "total": len(all_items),
             "positive": len(positives),
             "negative": len(negatives),
             "neutral": len(neutrals),
+            "suggestions": len(suggestions),
         },
-        "all_comments": all_items,           # for search + top-N in UI
+
+        "all_comments": all_items,
+
+        "suggestions": {
+            "count": len(suggestions),
+            "overview": suggestions_overview,
+            "examples": [s["text"] for s in suggestions[:20]],
+        },
     }
+
+def summarize_theme_overview(clusters: dict, label: str):
+    """
+    clusters = {
+       "0": {"summary": "...", "examples": [...]},
+       "1": {"summary": "...", "examples": [...]},
+       ...
+    }
+    """
+    if not clusters:
+        return f"No major {label} themes found."
+
+    summaries = []
+    for cid, data in clusters.items():   # data is the dict
+        if isinstance(data, dict) and "summary" in data:
+            summaries.append(data["summary"])
+
+    if not summaries:
+        return f"No major {label} themes identified."
+
+    # Combine them nicely
+    return (
+        f"Top {label} themes include: "
+        + "; ".join(summaries[:4])  # limit to 4 themes
+        + "."
+    )
+
+
+

@@ -13,16 +13,40 @@ vader = SentimentIntensityAnalyzer()
 # Common Indian-language positive/negative words
 INDIAN_SENTIMENT = {
     "positive": [
-        "super", "bagundi", "chala bagundi", "awesome", "semma",
-        "superb", "mass", "class", "nalla", "vallare", "bahut accha",
-        "accha", "mast", "jhakaas", "super anna", "blockbuster",
-        "super hit", "hit", "pogaru"
+        "super",
+        "bagundi",
+        "chala bagundi",
+        "awesome",
+        "semma",
+        "superb",
+        "mass",
+        "class",
+        "nalla",
+        "vallare",
+        "bahut accha",
+        "accha",
+        "mast",
+        "jhakaas",
+        "super anna",
+        "blockbuster",
+        "super hit",
+        "hit",
+        "pogaru",
     ],
     "negative": [
-        "worst", "boring", "waste", "thopu",
-        "worst scene", "not good", "pichachi",
-        "bad", "dabba", "falthu", "bekaar", "idhu sari illa"
-    ]
+        "worst",
+        "boring",
+        "waste",
+        "thopu",
+        "worst scene",
+        "not good",
+        "pichachi",
+        "bad",
+        "dabba",
+        "falthu",
+        "bekaar",
+        "idhu sari illa",
+    ],
 }
 
 # Emoji sentiment

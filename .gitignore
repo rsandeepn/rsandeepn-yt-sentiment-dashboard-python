@@ -22,3 +22,5 @@ tokenizers/
 
 # macOS files
 .DS_Store
+
+#uvicorn main:app --reload
