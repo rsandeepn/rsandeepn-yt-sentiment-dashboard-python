@@ -5,3 +5,8 @@ python-dotenv
 sentence-transformers
 scikit-learn
 nltk
+sqlalchemy>=2.0,<3.0
+psycopg[binary]>=3.2,<4.0
+pwdlib[argon2]>=0.2,<1.0
+PyJWT>=2.10,<3.0
+pydantic[email]>=2.0,<3.0
