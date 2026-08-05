@@ -29,8 +29,22 @@ class AnalysisHistoryItem(BaseModel):
     id: str
     video_id: str
     video_url: str
+    status: str
+    progress: int
+    status_message: str | None
+    error_message: str | None
     created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None
 
 
 class AnalysisHistoryDetail(AnalysisHistoryItem):
     result: dict
+
+
+class AnalysisHistoryPage(BaseModel):
+    items: list[AnalysisHistoryItem]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
