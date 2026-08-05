@@ -547,11 +547,19 @@ def build_summary(total, positives, negatives, neutrals, theme_overview, suggest
 # ----------------------------
 # MAIN
 # ----------------------------
-def analyze_comments(video_url: str):
+def analyze_comments(video_url: str, progress_callback=None):
+    def report(progress, message):
+        if progress_callback:
+            progress_callback(progress, message)
+
     video_id = extract_video_id(video_url)
+    report(15, "Fetching comments")
     raw = fetch_comments(video_id, max_comments=5000)
+    if not raw:
+        raise ValueError("No comments are available for this video.")
 
     texts = [clean_text(c["text"]) for c in raw]
+    report(45, "Analyzing sentiment")
     sentiments = classify_sentiment_batch(texts)
 
     all_items = sentiments
@@ -561,6 +569,7 @@ def analyze_comments(video_url: str):
 
     suggestions = detect_suggestions(all_items)
 
+    report(70, "Discovering themes")
     pos_clusters = cluster_and_summarize([c["text"] for c in positives])
     neg_clusters = cluster_and_summarize([c["text"] for c in negatives])
 
@@ -593,6 +602,7 @@ def analyze_comments(video_url: str):
         len(all_items), positives, negatives, neutrals, theme_overview, suggestions
     )
 
+    report(90, "Preparing results")
     return {
         "overview": short_overview,
         "summary": detailed_summary,

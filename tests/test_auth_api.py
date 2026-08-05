@@ -8,11 +8,23 @@ os.environ["DATABASE_URL"] = "sqlite+pysqlite:///file:auth_tests?mode=memory&cac
 os.environ["JWT_SECRET_KEY"] = "test-secret-key-that-is-not-used-outside-tests"
 
 fake_agent = types.ModuleType("agent")
-fake_agent.analyze_comments = lambda _url: {
-    "stats": {"total": 1, "positive": 1, "negative": 0, "neutral": 0, "suggestions": 0},
-    "overview": "Positive feedback is dominant.",
-    "comments": [],
-}
+failure_videos = set()
+
+
+def fake_analyze(url, progress_callback=None):
+    if progress_callback:
+        progress_callback(15, "Fetching comments")
+        progress_callback(45, "Analyzing sentiment")
+    if any(video_id in url for video_id in failure_videos):
+        raise ValueError("No comments are available for this video.")
+    return {
+        "stats": {"total": 1, "positive": 1, "negative": 0, "neutral": 0, "suggestions": 0},
+        "overview": "Positive feedback is dominant.",
+        "all_comments": [],
+    }
+
+
+fake_agent.analyze_comments = fake_analyze
 sys.modules.setdefault("agent", fake_agent)
 
 from fastapi.testclient import TestClient
@@ -24,6 +36,7 @@ from main import app
 
 class AuthApiTests(unittest.TestCase):
     def setUp(self):
+        failure_videos.clear()
         Base.metadata.drop_all(bind=engine)
         Base.metadata.create_all(bind=engine)
         self.client_context = TestClient(app)
@@ -85,15 +98,21 @@ class AuthApiTests(unittest.TestCase):
 
         token = self.register().json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
-        analyzed = self.client.post("/analyze", json={"url": url}, headers=headers)
-        self.assertEqual(analyzed.status_code, 200)
+        analyzed = self.client.post("/analyses", json={"url": url}, headers=headers)
+        self.assertEqual(analyzed.status_code, 202)
+        completed = self.client.get(
+            f"/analyses/{analyzed.json()['id']}", headers=headers
+        )
+        self.assertEqual(completed.json()["status"], "completed")
 
         history = self.client.get("/analyses", headers=headers)
         self.assertEqual(history.status_code, 200)
-        self.assertEqual(len(history.json()), 1)
-        self.assertEqual(history.json()[0]["video_id"], "q9rt-hDD4AY")
+        self.assertEqual(history.json()["total"], 1)
+        self.assertEqual(history.json()["items"][0]["video_id"], "q9rt-hDD4AY")
 
-        detail = self.client.get(f"/analyses/{history.json()[0]['id']}", headers=headers)
+        detail = self.client.get(
+            f"/analyses/{history.json()['items'][0]['id']}", headers=headers
+        )
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["result"]["stats"]["total"], 1)
 
@@ -101,11 +120,11 @@ class AuthApiTests(unittest.TestCase):
         first_token = self.register("first@example.com").json()["access_token"]
         first_headers = {"Authorization": f"Bearer {first_token}"}
         self.client.post(
-            "/analyze",
+            "/analyses",
             json={"url": "https://youtu.be/q9rt-hDD4AY"},
             headers=first_headers,
         )
-        analysis_id = self.client.get("/analyses", headers=first_headers).json()[0]["id"]
+        analysis_id = self.client.get("/analyses", headers=first_headers).json()["items"][0]["id"]
 
         second_token = self.register("second@example.com").json()["access_token"]
         response = self.client.get(
@@ -113,6 +132,68 @@ class AuthApiTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {second_token}"},
         )
         self.assertEqual(response.status_code, 404)
+
+    def test_duplicate_reuse_and_explicit_reanalysis(self):
+        token = self.register().json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        payload = {"url": "https://youtu.be/q9rt-hDD4AY"}
+        first = self.client.post("/analyses", json=payload, headers=headers).json()
+        duplicate = self.client.post("/analyses", json=payload, headers=headers).json()
+        self.assertEqual(duplicate["id"], first["id"])
+
+        reanalyzed = self.client.post(
+            f"/analyses/{first['id']}/reanalyze", headers=headers
+        )
+        self.assertEqual(reanalyzed.status_code, 200)
+        self.assertNotEqual(reanalyzed.json()["id"], first["id"])
+        self.assertEqual(self.client.get("/analyses", headers=headers).json()["total"], 2)
+
+    def test_failed_job_can_be_retried_and_deleted(self):
+        token = self.register().json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        failure_videos.add("failed1")
+        queued = self.client.post(
+            "/analyses",
+            json={"url": "https://youtu.be/failed1"},
+            headers=headers,
+        ).json()
+        failed = self.client.get(
+            f"/analyses/{queued['id']}", headers=headers
+        ).json()
+        self.assertEqual(failed["status"], "failed")
+        self.assertIn("No comments", failed["error_message"])
+
+        failure_videos.clear()
+        retried = self.client.post(
+            f"/analyses/{failed['id']}/retry", headers=headers
+        )
+        self.assertEqual(retried.status_code, 200)
+        completed = self.client.get(
+            f"/analyses/{failed['id']}", headers=headers
+        )
+        self.assertEqual(completed.json()["status"], "completed")
+
+        deleted = self.client.delete(f"/analyses/{failed['id']}", headers=headers)
+        self.assertEqual(deleted.status_code, 204)
+        self.assertEqual(self.client.get("/analyses", headers=headers).json()["total"], 0)
+
+    def test_history_search_status_and_pagination(self):
+        token = self.register().json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        for video_id in ("video01", "video02", "other03"):
+            self.client.post(
+                "/analyses",
+                json={"url": f"https://youtu.be/{video_id}"},
+                headers=headers,
+            )
+
+        response = self.client.get(
+            "/analyses", params={"search": "video", "status": "completed", "page_size": 1}, headers=headers
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["total"], 2)
+        self.assertEqual(response.json()["total_pages"], 2)
+        self.assertEqual(len(response.json()["items"]), 1)
 
 
 if __name__ == "__main__":

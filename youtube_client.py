@@ -58,8 +58,10 @@ def _call_youtube_api(url: str):
 
     try:
         resp = requests.get(url, timeout=(5, 30))
+    except requests.Timeout as exc:
+        raise YouTubeClientError("YouTube API request timed out.") from exc
     except requests.RequestException as exc:
-        raise YouTubeClientError("YouTube API request failed.") from exc
+        raise YouTubeClientError("YouTube API network request failed.") from exc
 
     try:
         data = resp.json()
