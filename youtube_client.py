@@ -8,6 +8,14 @@ load_dotenv()
 API_KEY = os.getenv("YOUTUBE_API_KEY")
 
 
+class YouTubeClientError(Exception):
+    """Raised when YouTube data cannot be retrieved."""
+
+
+class YouTubeConfigurationError(YouTubeClientError):
+    """Raised when the server has no YouTube API key."""
+
+
 # -------------------------------------------------------------------
 # ✅ Extract Video ID from ALL YouTube URL formats (Watch, Shorts, etc.)
 # -------------------------------------------------------------------
@@ -45,15 +53,31 @@ def extract_video_id(url: str):
 # Internal: API call helper with error handling
 # ---------------------------------------------------------
 def _call_youtube_api(url: str):
-    resp = requests.get(url)
+    if not API_KEY:
+        raise YouTubeConfigurationError("YOUTUBE_API_KEY is not configured.")
+
+    try:
+        resp = requests.get(url, timeout=(5, 30))
+    except requests.RequestException as exc:
+        raise YouTubeClientError("YouTube API request failed.") from exc
+
     try:
         data = resp.json()
-    except Exception:
-        raise Exception(f"YouTube API Error: Non-JSON response ({resp.status_code})")
+    except ValueError as exc:
+        raise YouTubeClientError(
+            f"YouTube API returned a non-JSON response ({resp.status_code})."
+        ) from exc
 
     if "error" in data:
         message = data["error"].get("message", "Unknown error")
-        raise Exception(f"YouTube API Error: {message}")
+        raise YouTubeClientError(f"YouTube API error: {message}")
+
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as exc:
+        raise YouTubeClientError(
+            f"YouTube API returned HTTP {resp.status_code}."
+        ) from exc
 
     return data
 
@@ -61,19 +85,30 @@ def _call_youtube_api(url: str):
 # ---------------------------------------------------------
 # Internal: Fetch replies for a top-level comment
 # ---------------------------------------------------------
-def _fetch_replies(parent_id: str):
-    url = (
-        "https://www.googleapis.com/youtube/v3/comments"
-        f"?part=snippet&parentId={parent_id}&key={API_KEY}&maxResults=100"
-    )
-    data = _call_youtube_api(url)
-
+def _fetch_replies(parent_id: str, max_replies: int):
     replies = []
-    for item in data.get("items", []):
-        snippet = item["snippet"]
-        text = snippet.get("textDisplay", "").strip()
-        if text:
-            replies.append({"text": text})
+
+    page_token = None
+    while len(replies) < max_replies:
+        page_size = min(100, max_replies - len(replies))
+        url = (
+            "https://www.googleapis.com/youtube/v3/comments"
+            f"?part=snippet&parentId={parent_id}&key={API_KEY}&maxResults={page_size}"
+        )
+        if page_token:
+            url += f"&pageToken={page_token}"
+
+        data = _call_youtube_api(url)
+
+        for item in data.get("items", []):
+            snippet = item["snippet"]
+            text = snippet.get("textDisplay", "").strip()
+            if text:
+                replies.append({"text": text})
+
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            break
 
     return replies
 
@@ -88,7 +123,7 @@ def fetch_comments(video_id: str, max_comments: int = 50000):
     """
 
     if not video_id:
-        raise Exception("Invalid YouTube URL — could not extract video ID.")
+        raise YouTubeClientError("Invalid YouTube URL — could not extract video ID.")
 
     comments = []
     page_token = None
@@ -125,7 +160,8 @@ def fetch_comments(video_id: str, max_comments: int = 50000):
             # Fetch replies if present
             reply_count = item["snippet"].get("totalReplyCount", 0)
             if reply_count > 0:
-                replies = _fetch_replies(item["id"])
+                remaining = max_comments - total_fetched
+                replies = _fetch_replies(item["id"], remaining)
                 comments.extend(replies)
                 total_fetched += len(replies)
 

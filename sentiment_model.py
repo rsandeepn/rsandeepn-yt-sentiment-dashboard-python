@@ -1,14 +1,35 @@
 # sentiment_model.py
+import os
 import re
+import tempfile
+
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 import nltk
 
-# Download VADER once
-nltk.download("vader_lexicon", quiet=True)
+
+def load_vader():
+    try:
+        return SentimentIntensityAnalyzer()
+    except LookupError:
+        download_dir = os.getenv(
+            "NLTK_DATA",
+            os.path.join(tempfile.gettempdir(), "yt-sentiment-nltk-data"),
+        )
+        os.makedirs(download_dir, exist_ok=True)
+        downloaded = nltk.download(
+            "vader_lexicon",
+            quiet=True,
+            download_dir=download_dir,
+        )
+        if not downloaded:
+            raise RuntimeError("Unable to download the NLTK VADER lexicon.")
+        if download_dir not in nltk.data.path:
+            nltk.data.path.append(download_dir)
+        return SentimentIntensityAnalyzer()
 
 print("⚡ Loading lightweight multilingual sentiment model...")
 
-vader = SentimentIntensityAnalyzer()
+vader = load_vader()
 
 # Common Indian-language positive/negative words
 INDIAN_SENTIMENT = {
@@ -32,12 +53,12 @@ INDIAN_SENTIMENT = {
         "super hit",
         "hit",
         "pogaru",
+        "thopu",
     ],
     "negative": [
         "worst",
         "boring",
         "waste",
-        "thopu",
         "worst scene",
         "not good",
         "pichachi",
@@ -59,6 +80,12 @@ def normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
 
 
+def contains_phrase(text: str, phrase: str) -> bool:
+    """Match complete words or phrases instead of arbitrary substrings."""
+    pattern = rf"(?<!\w){re.escape(phrase)}(?!\w)"
+    return re.search(pattern, text) is not None
+
+
 def classify_sentiment(text: str):
     """
     Returns (label, score) where:
@@ -78,10 +105,10 @@ def classify_sentiment(text: str):
 
     # 2) Indian-language keyword matching
     for w in INDIAN_SENTIMENT["positive"]:
-        if w in t:
+        if contains_phrase(t, w):
             return "positive", 0.7
     for w in INDIAN_SENTIMENT["negative"]:
-        if w in t:
+        if contains_phrase(t, w):
             return "negative", -0.7
 
     # 3) VADER (handles English + transliterated text)
