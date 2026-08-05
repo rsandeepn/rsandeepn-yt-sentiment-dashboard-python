@@ -424,6 +424,7 @@ from sklearn.cluster import KMeans
 
 from sentiment_model import classify_sentiment_batch
 from youtube_client import fetch_comments, extract_video_id
+from analytics import build_dashboard_insights
 
 EXAMPLE_LIMIT = 12
 
@@ -604,6 +605,7 @@ def analyze_comments(video_url: str, progress_callback=None):
 
     report(90, "Preparing results")
     return {
+        "video": {"id": video_id, "url": video_url},
         "overview": short_overview,
         "summary": detailed_summary,
         "positive_clusters": pos_clusters,
@@ -621,5 +623,6 @@ def analyze_comments(video_url: str, progress_callback=None):
             "count": len(suggestions),
             "overview": f"{len(suggestions)} comments suggest improvements.",
             "examples": [s["text"] for s in suggestions[:15]]
-        }
+        },
+        "insights": build_dashboard_insights(all_items, len(suggestions)),
     }
