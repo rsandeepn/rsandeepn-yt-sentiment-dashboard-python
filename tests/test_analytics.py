@@ -1,6 +1,6 @@
 import unittest
 
-from analytics import build_dashboard_insights, dominant_script, top_keywords
+from analytics import build_dashboard_insights, top_keywords
 
 
 class DashboardAnalyticsTests(unittest.TestCase):
@@ -12,12 +12,7 @@ class DashboardAnalyticsTests(unittest.TestCase):
         self.assertEqual(keywords[0], {"keyword": "excellent", "count": 3})
         self.assertEqual(keywords[1], {"keyword": "music", "count": 2})
 
-    def test_dominant_script_supports_indian_scripts(self):
-        self.assertEqual(dominant_script("చాలా బాగుంది"), "Telugu")
-        self.assertEqual(dominant_script("बहुत अच्छा"), "Devanagari")
-        self.assertEqual(dominant_script("super video"), "Latin")
-
-    def test_dashboard_percentages_and_language_breakdown(self):
+    def test_dashboard_percentages(self):
         insights = build_dashboard_insights([
             {"text": "Great music", "sentiment": "positive", "score": 0.8},
             {"text": "చాలా బాగుంది", "sentiment": "positive", "score": 0.7},
@@ -27,7 +22,7 @@ class DashboardAnalyticsTests(unittest.TestCase):
         self.assertEqual(insights["dominant_sentiment"], "positive")
         self.assertEqual(insights["positive_percentage"], 50.0)
         self.assertEqual(insights["suggestion_percentage"], 25.0)
-        self.assertEqual(sum(row["count"] for row in insights["language_breakdown"]), 4)
+        self.assertNotIn("language_breakdown", insights)
 
 
 if __name__ == "__main__":
