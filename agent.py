@@ -522,6 +522,28 @@ def summarize_theme_overview(clusters, label):
     summaries = [v["summary"] for v in clusters.values()]
     return f"Top {label} themes include: " + "; ".join(summaries[:4]) + "."
 
+
+def build_summary(total, positives, negatives, neutrals, theme_overview, suggestions):
+    if total == 0:
+        return "No comments were available to analyze."
+
+    counts = {
+        "positive": len(positives),
+        "negative": len(negatives),
+        "neutral": len(neutrals),
+    }
+    dominant_sentiment = max(counts, key=counts.get)
+    dominant_percentage = counts[dominant_sentiment] / total * 100
+
+    return "\n".join([
+        f"Analyzed {total} comments. The dominant sentiment is "
+        f"{dominant_sentiment} ({dominant_percentage:.1f}%).",
+        theme_overview["positive"],
+        theme_overview["negative"],
+        theme_overview["neutral"],
+        f"Found {len(suggestions)} comments containing improvement-related suggestions.",
+    ])
+
 # ----------------------------
 # MAIN
 # ----------------------------
@@ -550,15 +572,30 @@ def analyze_comments(video_url: str):
 
     overview_keywords = extract_keywords(texts, 5)
 
+    sentiment_counts = {
+        "positive": len(positives),
+        "negative": len(negatives),
+        "neutral": len(neutrals),
+    }
+    dominant_sentiment = (
+        max(sentiment_counts, key=sentiment_counts.get) if all_items else "neutral"
+    )
+    keyword_text = ", ".join(overview_keywords) or "the video"
+
     short_overview = (
         f"Viewers left {len(all_items)} comments. "
-        f"Overall sentiment is mixed with more positive reactions. "
-        f"People frequently discuss {', '.join(overview_keywords)}. "
+        f"The largest sentiment group is {dominant_sentiment}. "
+        f"People frequently discuss {keyword_text}. "
         f"There are {len(suggestions)} improvement-related suggestions."
+    )
+
+    detailed_summary = build_summary(
+        len(all_items), positives, negatives, neutrals, theme_overview, suggestions
     )
 
     return {
         "overview": short_overview,
+        "summary": detailed_summary,
         "positive_clusters": pos_clusters,
         "negative_clusters": neg_clusters,
         "theme_overview": theme_overview,
