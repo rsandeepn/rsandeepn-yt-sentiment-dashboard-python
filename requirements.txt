@@ -1,10 +1,10 @@
-fastapi
-uvicorn[standard]
-requests
-python-dotenv
-sentence-transformers
-scikit-learn
-nltk
+fastapi>=0.115,<0.116
+uvicorn[standard]>=0.30,<0.31
+requests>=2.32,<3.0
+python-dotenv>=1.0,<2.0
+scikit-learn>=1.5,<2.0
+nltk>=3.9,<4.0
+httpx>=0.27,<0.28
 sqlalchemy>=2.0,<3.0
 psycopg[binary]>=3.2,<4.0
 pwdlib[argon2]>=0.2,<1.0

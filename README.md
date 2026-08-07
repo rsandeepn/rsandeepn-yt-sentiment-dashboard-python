@@ -43,3 +43,9 @@ configure PostgreSQL for the intended server environment.
 ```bash
 python -m unittest discover -s tests -v
 ```
+
+## Docker Compose
+
+For the production-style local stack with the frontend and PostgreSQL, follow
+[DOCKER.md](DOCKER.md). The stack keeps database data in a persistent Docker
+volume and does not introduce usage limits.
