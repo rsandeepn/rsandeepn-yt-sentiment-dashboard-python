@@ -419,12 +419,10 @@ from collections import Counter
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-from sentence_transformers import SentenceTransformer
-from sklearn.cluster import KMeans
-
 from sentiment_model import classify_sentiment_batch
 from youtube_client import fetch_comments, extract_video_id
 from analytics import build_dashboard_insights
+from theme_clustering import cluster_labels
 
 EXAMPLE_LIMIT = 12
 
@@ -455,13 +453,6 @@ def extract_keywords(texts, top_k=8):
     freq = Counter(words)
     return [w for w, _ in freq.most_common(top_k)]
 
-# ----------------------------
-# Embeddings
-# ----------------------------
-embedder = SentenceTransformer(
-    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-)
-
 def clean_text(x: str) -> str:
     x = re.sub(r"<.*?>", "", x)
     return re.sub(r"\s+", " ", x).strip()
@@ -474,12 +465,13 @@ def cluster_and_summarize(comments, num_clusters=5):
         return {}
 
     comments = [clean_text(c) for c in comments]
+    comments = [comment for comment in comments if comment]
+    if not comments:
+        return {}
 
-    if len(comments) < num_clusters:
-        num_clusters = max(1, len(comments))
+    num_clusters = max(1, min(num_clusters, len(set(comments))))
 
-    embeddings = embedder.encode(comments)
-    labels = KMeans(n_clusters=num_clusters, random_state=42, n_init="auto").fit_predict(embeddings)
+    labels = cluster_labels(comments, num_clusters)
 
     clusters = {}
     for i, label in enumerate(labels):
