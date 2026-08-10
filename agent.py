@@ -436,8 +436,10 @@ STOPWORDS = {
     "very","just","like","here","please","thanks","thank","will","how",
     "should","can","could","would","need","make","more","do","did","does",
     "is","am","are","was","were","be","been","being","next","time","want",
-    "i","me","my","we","our","they","their","he","she","it","a","an","to",
-    "but","what","who","why","when","where","on","in","of","as","at","not"
+    "i","me","my","we","our","they","their","them","theirs","he","him","his",
+    "she","her","hers","it","its","a","an","to","but","what","who","why",
+    "when","where","on","in","of","as","at","not","all","after","before","now",
+    "then","there","these","those","some","any","each","both","other","only"
 }
 
 def extract_keywords(texts, top_k=8):

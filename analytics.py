@@ -5,11 +5,22 @@ from collections import Counter
 TOKEN_RE = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
 
 STOPWORDS = {
-    "the", "and", "for", "this", "that", "with", "have", "from", "your",
-    "you", "very", "just", "like", "here", "please", "thanks", "thank",
-    "will", "how", "should", "can", "could", "would", "need", "make",
-    "more", "are", "was", "were", "been", "being", "what", "who", "why",
-    "when", "where", "not", "but", "its", "our", "their", "video",
+    "a", "about", "after", "again", "against", "all", "am", "an", "and",
+    "any", "are", "aren", "as", "at", "be", "because", "been", "before",
+    "being", "below", "between", "both", "but", "by", "can", "could",
+    "did", "do", "does", "doing", "don", "down", "during", "each", "few",
+    "for", "from", "further", "had", "has", "have", "having", "he", "her",
+    "here", "hers", "herself", "him", "himself", "his", "how", "i", "if",
+    "in", "into", "is", "it", "its", "itself", "just", "like", "make",
+    "me", "more", "most", "my", "myself", "need", "no", "nor", "not",
+    "now", "of", "off", "on", "once", "only", "or", "other", "our",
+    "ours", "ourselves", "out", "over", "own", "please", "same", "she",
+    "should", "so", "some", "such", "than", "that", "the", "their",
+    "theirs", "them", "themselves", "then", "there", "these", "they",
+    "this", "those", "through", "to", "too", "under", "until", "up",
+    "very", "video", "was", "we", "were", "what", "when", "where",
+    "which", "while", "who", "whom", "why", "will", "with", "would",
+    "you", "your", "yours", "yourself", "yourselves", "thank", "thanks",
 }
 
 def top_keywords(texts, limit=10):

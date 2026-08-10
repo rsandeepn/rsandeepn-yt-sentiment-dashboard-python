@@ -31,6 +31,29 @@ Put the first value in `JWT_SECRET_KEY`. Put the second value in both
 `POSTGRES_PASSWORD` and the password portion of `DATABASE_URL`. Also set the
 restricted YouTube API key.
 
+### Google sign-in
+
+Create a Google OAuth 2.0 **Web application** client and add the site URL as an
+authorized JavaScript origin. For local Docker testing, add:
+
+```text
+http://localhost:8080
+```
+
+Add the public HTTPS domain later as a second origin. Put the client ID (not a
+client secret) in `.env.docker`:
+
+```env
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+```
+
+Docker passes the same client ID to the frontend at build time and to the
+backend at runtime. Rebuild both services after changing it:
+
+```bash
+docker compose --env-file .env.docker up --build -d backend frontend
+```
+
 Validate and start the stack:
 
 ```bash

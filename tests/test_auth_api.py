@@ -3,6 +3,7 @@ import sys
 import types
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 os.environ["DATABASE_URL"] = "sqlite+pysqlite:///file:auth_tests?mode=memory&cache=shared&uri=true"
 os.environ["JWT_SECRET_KEY"] = "test-secret-key-that-is-not-used-outside-tests"
@@ -45,16 +46,24 @@ class AuthApiTests(unittest.TestCase):
     def tearDown(self):
         self.client_context.__exit__(None, None, None)
 
-    def register(self, email="person@example.com"):
+    def register(self, email="person@example.com", first_name="Sandeep", last_name="Rongali"):
         return self.client.post(
             "/auth/register",
-            json={"email": email, "password": "secure-password"},
+            json={
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": email,
+                "password": "secure-password",
+                "confirm_password": "secure-password",
+            },
         )
 
     def test_register_login_and_current_user(self):
         registered = self.register("Person@Example.com")
         self.assertEqual(registered.status_code, 201)
         self.assertEqual(registered.json()["user"]["email"], "person@example.com")
+        self.assertEqual(registered.json()["user"]["first_name"], "Sandeep")
+        self.assertEqual(registered.json()["user"]["last_name"], "Rongali")
         self.assertNotIn("password", registered.json()["user"])
 
         token = registered.json()["access_token"]
@@ -68,6 +77,36 @@ class AuthApiTests(unittest.TestCase):
             json={"email": "person@example.com", "password": "secure-password"},
         )
         self.assertEqual(logged_in.status_code, 200)
+
+    def test_registration_rejects_mismatched_passwords(self):
+        response = self.client.post(
+            "/auth/register",
+            json={
+                "first_name": "Sandeep",
+                "last_name": "Rongali",
+                "email": "person@example.com",
+                "password": "secure-password",
+                "confirm_password": "different-password",
+            },
+        )
+        self.assertEqual(response.status_code, 422)
+
+    @patch("main.verify_google_credential")
+    def test_google_login_creates_and_reuses_verified_user(self, verify):
+        verify.return_value = {
+            "email": "Google.User@Example.com",
+            "email_verified": True,
+            "given_name": "Google",
+            "family_name": "User",
+        }
+        first = self.client.post("/auth/google", json={"credential": "google-id-token"})
+        second = self.client.post("/auth/google", json={"credential": "google-id-token"})
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.json()["user"]["email"], "google.user@example.com")
+        self.assertEqual(first.json()["user"]["first_name"], "Google")
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.json()["user"]["id"], first.json()["user"]["id"])
 
     def test_duplicate_registration_and_bad_login(self):
         self.assertEqual(self.register().status_code, 201)
