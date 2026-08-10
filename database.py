@@ -51,3 +51,19 @@ def ensure_analysis_job_columns():
                 "WHERE updated_at IS NULL"
             )
         )
+
+
+def ensure_user_profile_columns():
+    """Add profile fields without requiring existing Docker data to be reset."""
+    existing = {column["name"] for column in inspect(engine).get_columns("users")}
+    additions = {
+        "first_name": "VARCHAR(100)",
+        "last_name": "VARCHAR(100)",
+    }
+    missing = [(name, definition) for name, definition in additions.items() if name not in existing]
+    if not missing:
+        return
+
+    with engine.begin() as connection:
+        for name, definition in missing:
+            connection.execute(text(f"ALTER TABLE users ADD COLUMN {name} {definition}"))

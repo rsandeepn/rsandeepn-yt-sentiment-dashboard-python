@@ -20,14 +20,25 @@ from auth import (
     hash_password,
     jwt_secret,
     normalize_email,
+    unusable_password_hash,
+    verify_google_credential,
 )
-from database import Base, SessionLocal, engine, ensure_analysis_job_columns, get_db
+from database import (
+    Base,
+    SessionLocal,
+    engine,
+    ensure_analysis_job_columns,
+    ensure_user_profile_columns,
+    get_db,
+)
 from models import Analysis, User
 from schemas import (
     AnalysisHistoryDetail,
     AnalysisHistoryPage,
     AuthRequest,
     AuthResponse,
+    GoogleAuthRequest,
+    RegisterRequest,
     UserResponse,
 )
 from youtube_client import (
@@ -52,6 +63,7 @@ async def lifespan(_app: FastAPI):
     jwt_secret()
     Base.metadata.create_all(bind=engine)
     ensure_analysis_job_columns()
+    ensure_user_profile_columns()
     with SessionLocal() as db:
         db.execute(
             update(Analysis)
@@ -93,8 +105,13 @@ def auth_response(user: User) -> AuthResponse:
 
 
 @app.post("/auth/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-def register(req: AuthRequest, db: Session = Depends(get_db)):
-    user = User(email=normalize_email(req.email), password_hash=hash_password(req.password))
+def register(req: RegisterRequest, db: Session = Depends(get_db)):
+    user = User(
+        first_name=req.first_name,
+        last_name=req.last_name,
+        email=normalize_email(req.email),
+        password_hash=hash_password(req.password),
+    )
     db.add(user)
     try:
         db.commit()
@@ -102,6 +119,46 @@ def register(req: AuthRequest, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=409, detail="An account with this email already exists.") from None
     db.refresh(user)
+    return auth_response(user)
+
+
+@app.post("/auth/google", response_model=AuthResponse)
+def google_login(req: GoogleAuthRequest, db: Session = Depends(get_db)):
+    try:
+        profile = verify_google_credential(req.credential)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from None
+
+    email = normalize_email(profile["email"])
+    user = db.scalar(select(User).where(User.email == email))
+    if user is None:
+        user = User(
+            first_name=(profile.get("given_name") or "").strip() or None,
+            last_name=(profile.get("family_name") or "").strip() or None,
+            email=email,
+            password_hash=unusable_password_hash(),
+        )
+        db.add(user)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            user = db.scalar(select(User).where(User.email == email))
+        else:
+            db.refresh(user)
+    else:
+        changed = False
+        if not user.first_name and profile.get("given_name"):
+            user.first_name = profile["given_name"].strip()
+            changed = True
+        if not user.last_name and profile.get("family_name"):
+            user.last_name = profile["family_name"].strip()
+            changed = True
+        if changed:
+            db.commit()
+
     return auth_response(user)
 
 

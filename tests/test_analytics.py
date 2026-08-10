@@ -12,6 +12,15 @@ class DashboardAnalyticsTests(unittest.TestCase):
         self.assertEqual(keywords[0], {"keyword": "excellent", "count": 3})
         self.assertEqual(keywords[1], {"keyword": "music", "count": 2})
 
+    def test_keywords_exclude_pronouns_and_filler_words(self):
+        keywords = top_keywords([
+            "All of them said they liked her music after she performed",
+            "Now he says his music and performance were excellent",
+        ])
+        terms = {item["keyword"] for item in keywords}
+        self.assertTrue({"music", "performance", "excellent"}.issubset(terms))
+        self.assertTrue(terms.isdisjoint({"all", "them", "they", "her", "after", "she", "now", "he", "his"}))
+
     def test_dashboard_percentages(self):
         insights = build_dashboard_insights([
             {"text": "Great music", "sentiment": "positive", "score": 0.8},

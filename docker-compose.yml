@@ -39,6 +39,7 @@ services:
       context: ${FRONTEND_CONTEXT:-../yt-multilingual-react/yt-ui}
       args:
         VITE_API_BASE_URL: /api
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     restart: unless-stopped
     depends_on:
       backend:

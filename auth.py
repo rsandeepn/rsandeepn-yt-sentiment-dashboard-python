@@ -1,10 +1,12 @@
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jwt.exceptions import InvalidTokenError
+from jwt import PyJWKClient
+from jwt.exceptions import InvalidTokenError, PyJWKClientError
 from pwdlib import PasswordHash
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -33,6 +35,35 @@ def normalize_email(email: str) -> str:
 
 def hash_password(password: str) -> str:
     return password_hash.hash(password)
+
+
+def unusable_password_hash() -> str:
+    """Create a password hash that an OAuth-only user can never know."""
+    return hash_password(secrets.token_urlsafe(48))
+
+
+def verify_google_credential(credential: str) -> dict:
+    client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+    if not client_id:
+        raise RuntimeError("Google sign-in is not configured.")
+
+    try:
+        signing_key = PyJWKClient("https://www.googleapis.com/oauth2/v3/certs").get_signing_key_from_jwt(
+            credential
+        )
+        payload = jwt.decode(
+            credential,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=client_id,
+            issuer=["accounts.google.com", "https://accounts.google.com"],
+        )
+    except (InvalidTokenError, PyJWKClientError, ValueError) as exc:
+        raise ValueError("Google could not verify this sign-in.") from exc
+
+    if not payload.get("email_verified") or not payload.get("email"):
+        raise ValueError("Google did not return a verified email address.")
+    return payload
 
 
 def authenticate_user(db: Session, email: str, password: str) -> User | None:
