@@ -47,3 +47,10 @@ class Analysis(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped[User] = relationship(back_populates="analyses")
+
+    @property
+    def video_title(self) -> str | None:
+        """Read the title from the saved result without adding a database column."""
+        video = self.result.get("video") if isinstance(self.result, dict) else None
+        title = video.get("title") if isinstance(video, dict) else None
+        return title.strip() if isinstance(title, str) and title.strip() else None

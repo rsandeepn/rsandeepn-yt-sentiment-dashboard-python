@@ -19,6 +19,11 @@ def fake_analyze(url, progress_callback=None):
     if any(video_id in url for video_id in failure_videos):
         raise ValueError("No comments are available for this video.")
     return {
+        "video": {
+            "id": url.rsplit("/", 1)[-1],
+            "title": "Filmymoji Middle Class Madhu Kotha AC MCM",
+            "url": url,
+        },
         "stats": {"total": 1, "positive": 1, "negative": 0, "neutral": 0, "suggestions": 0},
         "overview": "Positive feedback is dominant.",
         "all_comments": [],
@@ -148,6 +153,10 @@ class AuthApiTests(unittest.TestCase):
         self.assertEqual(history.status_code, 200)
         self.assertEqual(history.json()["total"], 1)
         self.assertEqual(history.json()["items"][0]["video_id"], "q9rt-hDD4AY")
+        self.assertEqual(
+            history.json()["items"][0]["video_title"],
+            "Filmymoji Middle Class Madhu Kotha AC MCM",
+        )
 
         detail = self.client.get(
             f"/analyses/{history.json()['items'][0]['id']}", headers=headers

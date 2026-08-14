@@ -50,6 +50,7 @@ class AnalysisHistoryItem(BaseModel):
 
     id: str
     video_id: str
+    video_title: str | None
     video_url: str
     status: str
     progress: int

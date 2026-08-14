@@ -420,7 +420,7 @@ from collections import Counter
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 from sentiment_model import classify_sentiment_batch
-from youtube_client import fetch_comments, extract_video_id
+from youtube_client import extract_video_id, fetch_comments, fetch_video_title
 from analytics import build_dashboard_insights
 from theme_clustering import cluster_labels
 
@@ -549,6 +549,7 @@ def analyze_comments(video_url: str, progress_callback=None):
 
     video_id = extract_video_id(video_url)
     report(15, "Fetching comments")
+    video_title = fetch_video_title(video_id)
     raw = fetch_comments(video_id, max_comments=5000)
     if not raw:
         raise ValueError("No comments are available for this video.")
@@ -599,7 +600,7 @@ def analyze_comments(video_url: str, progress_callback=None):
 
     report(90, "Preparing results")
     return {
-        "video": {"id": video_id, "url": video_url},
+        "video": {"id": video_id, "title": video_title, "url": video_url},
         "overview": short_overview,
         "summary": detailed_summary,
         "positive_clusters": pos_clusters,

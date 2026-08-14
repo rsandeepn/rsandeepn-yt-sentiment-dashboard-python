@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from youtube_client import _fetch_replies, extract_video_id
+from youtube_client import _fetch_replies, extract_video_id, fetch_video_title
 
 
 class YouTubeClientTests(unittest.TestCase):
@@ -17,6 +17,17 @@ class YouTubeClientTests(unittest.TestCase):
         for url in urls:
             with self.subTest(url=url):
                 self.assertEqual(extract_video_id(url), video_id)
+
+    @patch("youtube_client._call_youtube_api")
+    def test_fetches_and_trims_video_title(self, api_call):
+        api_call.return_value = {
+            "items": [{"snippet": {"title": "  Filmymoji Middle Class Madhu Kotha AC MCM  "}}]
+        }
+
+        title = fetch_video_title("bMoQA-IFhks")
+
+        self.assertEqual(title, "Filmymoji Middle Class Madhu Kotha AC MCM")
+        self.assertIn("/videos?part=snippet&id=bMoQA-IFhks", api_call.call_args.args[0])
 
     @patch("youtube_client._call_youtube_api")
     def test_reply_fetching_paginates_and_respects_limit(self, api_call):

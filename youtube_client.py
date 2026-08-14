@@ -84,6 +84,26 @@ def _call_youtube_api(url: str):
     return data
 
 
+def fetch_video_title(video_id: str) -> str:
+    """Return the public YouTube title for a video."""
+    if not video_id:
+        raise YouTubeClientError("Invalid YouTube video ID.")
+
+    url = (
+        "https://www.googleapis.com/youtube/v3/videos"
+        f"?part=snippet&id={video_id}&key={API_KEY}"
+    )
+    data = _call_youtube_api(url)
+    items = data.get("items", [])
+    if not items:
+        raise YouTubeClientError("Video is private, deleted, or unavailable.")
+
+    title = items[0].get("snippet", {}).get("title", "").strip()
+    if not title:
+        raise YouTubeClientError("YouTube did not return a title for this video.")
+    return title
+
+
 # ---------------------------------------------------------
 # Internal: Fetch replies for a top-level comment
 # ---------------------------------------------------------
