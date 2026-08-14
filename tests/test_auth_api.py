@@ -4,6 +4,7 @@ import types
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 os.environ["DATABASE_URL"] = "sqlite+pysqlite:///file:auth_tests?mode=memory&cache=shared&uri=true"
 os.environ["JWT_SECRET_KEY"] = "test-secret-key-that-is-not-used-outside-tests"
@@ -121,6 +122,74 @@ class AuthApiTests(unittest.TestCase):
             json={"email": "person@example.com", "password": "wrong-password"},
         )
         self.assertEqual(bad_login.status_code, 401)
+
+    @patch("main.deliver_password_reset_email_safely")
+    def test_password_reset_changes_password_invalidates_sessions_and_is_single_use(self, send):
+        registered = self.register("reset@example.com")
+        original_token = registered.json()["access_token"]
+
+        requested = self.client.post(
+            "/auth/forgot-password", json={"email": "Reset@Example.com"}
+        )
+        self.assertEqual(requested.status_code, 200)
+        self.assertEqual(
+            requested.json()["message"],
+            "If an account exists for that email, a password reset link has been sent.",
+        )
+        send.assert_called_once()
+        reset_link = send.call_args.args[1]
+        raw_token = parse_qs(urlparse(reset_link).query)["token"][0]
+
+        reset = self.client.post(
+            "/auth/reset-password",
+            json={
+                "token": raw_token,
+                "password": "new-secure-password",
+                "confirm_password": "new-secure-password",
+            },
+        )
+        self.assertEqual(reset.status_code, 200)
+
+        old_session = self.client.get(
+            "/auth/me", headers={"Authorization": f"Bearer {original_token}"}
+        )
+        self.assertEqual(old_session.status_code, 401)
+        self.assertEqual(
+            self.client.post(
+                "/auth/login",
+                json={"email": "reset@example.com", "password": "secure-password"},
+            ).status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/auth/login",
+                json={"email": "reset@example.com", "password": "new-secure-password"},
+            ).status_code,
+            200,
+        )
+
+        reused = self.client.post(
+            "/auth/reset-password",
+            json={
+                "token": raw_token,
+                "password": "another-password",
+                "confirm_password": "another-password",
+            },
+        )
+        self.assertEqual(reused.status_code, 400)
+
+    @patch("main.deliver_password_reset_email_safely")
+    def test_forgot_password_does_not_reveal_unknown_email(self, send):
+        response = self.client.post(
+            "/auth/forgot-password", json={"email": "missing@example.com"}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["message"],
+            "If an account exists for that email, a password reset link has been sent.",
+        )
+        send.assert_not_called()
 
     def test_expired_token_is_rejected(self):
         token = jwt.encode(

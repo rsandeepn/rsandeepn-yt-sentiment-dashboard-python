@@ -54,6 +54,22 @@ backend at runtime. Rebuild both services after changing it:
 docker compose --env-file .env.docker up --build -d backend frontend
 ```
 
+### Password reset email
+
+Verify `mail.analyzeytcomments.com` as a sending domain in Resend, create a
+sending-only API key, and add these values to `.env.docker`:
+
+```env
+FRONTEND_BASE_URL=https://analyzeytcomments.com
+PASSWORD_RESET_EXPIRE_MINUTES=30
+PASSWORD_RESET_COOLDOWN_SECONDS=60
+PASSWORD_RESET_LOG_LINK=false
+RESEND_API_KEY=your-sending-only-resend-api-key
+PASSWORD_RESET_FROM_EMAIL="CommentScope <no-reply@mail.analyzeytcomments.com>"
+```
+
+Do not commit `.env.docker` or enable `PASSWORD_RESET_LOG_LINK` in production.
+
 Validate and start the stack:
 
 ```bash

@@ -76,11 +76,11 @@ def authenticate_user(db: Session, email: str, password: str) -> User | None:
     return user
 
 
-def create_access_token(user_id: str) -> tuple[str, int]:
+def create_access_token(user: User) -> tuple[str, int]:
     expires_in = ACCESS_TOKEN_EXPIRE_MINUTES * 60
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
     token = jwt.encode(
-        {"sub": user_id, "exp": expires_at},
+        {"sub": user.id, "ver": user.auth_version, "exp": expires_at},
         jwt_secret(),
         algorithm=JWT_ALGORITHM,
     )
@@ -105,12 +105,13 @@ def get_current_user(
             algorithms=[JWT_ALGORITHM],
         )
         user_id = payload.get("sub")
-        if not isinstance(user_id, str):
+        auth_version = payload.get("ver", 0)
+        if not isinstance(user_id, str) or not isinstance(auth_version, int):
             raise credentials_error
     except (InvalidTokenError, RuntimeError):
         raise credentials_error from None
 
     user = db.get(User, user_id)
-    if user is None:
+    if user is None or user.auth_version != auth_version:
         raise credentials_error
     return user

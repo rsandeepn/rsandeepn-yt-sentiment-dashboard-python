@@ -28,6 +28,26 @@ class GoogleAuthRequest(BaseModel):
     credential: str = Field(min_length=1, max_length=5000)
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=512)
+    password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
+
+    @model_validator(mode="after")
+    def passwords_match(self):
+        if self.password != self.confirm_password:
+            raise ValueError("Passwords do not match.")
+        return self
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

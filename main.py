@@ -2,7 +2,7 @@ import logging
 import math
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,16 +29,28 @@ from database import (
     engine,
     ensure_analysis_job_columns,
     ensure_user_profile_columns,
+    ensure_user_security_columns,
     get_db,
 )
-from models import Analysis, User
+from models import Analysis, PasswordResetToken, User
+from password_reset import (
+    deliver_password_reset_email_safely,
+    new_reset_token,
+    password_reset_cooldown_seconds,
+    password_reset_expiry_minutes,
+    reset_url,
+    token_digest,
+)
 from schemas import (
     AnalysisHistoryDetail,
     AnalysisHistoryPage,
     AuthRequest,
     AuthResponse,
+    ForgotPasswordRequest,
     GoogleAuthRequest,
+    MessageResponse,
     RegisterRequest,
+    ResetPasswordRequest,
     UserResponse,
 )
 from youtube_client import (
@@ -64,6 +76,7 @@ async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
     ensure_analysis_job_columns()
     ensure_user_profile_columns()
+    ensure_user_security_columns()
     with SessionLocal() as db:
         db.execute(
             update(Analysis)
@@ -100,7 +113,7 @@ def health():
 
 
 def auth_response(user: User) -> AuthResponse:
-    token, expires_in = create_access_token(user.id)
+    token, expires_in = create_access_token(user)
     return AuthResponse(access_token=token, expires_in=expires_in, user=user)
 
 
@@ -172,6 +185,100 @@ def login(req: AuthRequest, db: Session = Depends(get_db)):
             headers={"WWW-Authenticate": "Bearer"},
         )
     return auth_response(user)
+
+
+PASSWORD_RESET_REQUEST_MESSAGE = (
+    "If an account exists for that email, a password reset link has been sent."
+)
+
+
+def aware_datetime(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+@app.post("/auth/forgot-password", response_model=MessageResponse)
+def forgot_password(
+    req: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    user = db.scalar(select(User).where(User.email == normalize_email(req.email)))
+    if user is None:
+        return MessageResponse(message=PASSWORD_RESET_REQUEST_MESSAGE)
+
+    now = datetime.now(timezone.utc)
+    latest = db.scalar(
+        select(PasswordResetToken)
+        .where(PasswordResetToken.user_id == user.id)
+        .order_by(PasswordResetToken.created_at.desc())
+        .limit(1)
+    )
+    cooldown = password_reset_cooldown_seconds()
+    if latest and now - aware_datetime(latest.created_at) < timedelta(seconds=cooldown):
+        return MessageResponse(message=PASSWORD_RESET_REQUEST_MESSAGE)
+
+    db.execute(
+        update(PasswordResetToken)
+        .where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+        )
+        .values(used_at=now)
+    )
+    raw_token = new_reset_token()
+    db.add(
+        PasswordResetToken(
+            token_hash=token_digest(raw_token),
+            user_id=user.id,
+            expires_at=now + timedelta(minutes=password_reset_expiry_minutes()),
+        )
+    )
+    db.commit()
+    background_tasks.add_task(
+        deliver_password_reset_email_safely,
+        user.email,
+        reset_url(raw_token),
+    )
+    return MessageResponse(message=PASSWORD_RESET_REQUEST_MESSAGE)
+
+
+@app.post("/auth/reset-password", response_model=MessageResponse)
+def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
+    now = datetime.now(timezone.utc)
+    reset_token = db.scalar(
+        select(PasswordResetToken)
+        .where(PasswordResetToken.token_hash == token_digest(req.token))
+        .with_for_update()
+    )
+    if (
+        reset_token is None
+        or reset_token.used_at is not None
+        or aware_datetime(reset_token.expires_at) <= now
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="This password reset link is invalid or has expired.",
+        )
+
+    user = db.get(User, reset_token.user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=400,
+            detail="This password reset link is invalid or has expired.",
+        )
+
+    user.password_hash = hash_password(req.password)
+    user.auth_version += 1
+    db.execute(
+        update(PasswordResetToken)
+        .where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+        )
+        .values(used_at=now)
+    )
+    db.commit()
+    return MessageResponse(message="Your password has been reset. You can now sign in.")
 
 
 @app.get("/auth/me", response_model=UserResponse)

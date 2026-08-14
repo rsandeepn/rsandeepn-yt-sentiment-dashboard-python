@@ -67,3 +67,15 @@ def ensure_user_profile_columns():
     with engine.begin() as connection:
         for name, definition in missing:
             connection.execute(text(f"ALTER TABLE users ADD COLUMN {name} {definition}"))
+
+
+def ensure_user_security_columns():
+    """Add password-reset session invalidation fields to existing databases."""
+    existing = {column["name"] for column in inspect(engine).get_columns("users")}
+    if "auth_version" in existing:
+        return
+
+    with engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE users ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 0")
+        )
