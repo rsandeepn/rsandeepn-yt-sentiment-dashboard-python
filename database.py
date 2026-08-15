@@ -53,6 +53,37 @@ def ensure_analysis_job_columns():
         )
 
 
+def ensure_analysis_source_columns():
+    """Add cross-platform source fields and backfill existing YouTube analyses."""
+    existing = {column["name"] for column in inspect(engine).get_columns("analyses")}
+    additions = {
+        "platform": "VARCHAR(20) NOT NULL DEFAULT 'youtube'",
+        "content_type": "VARCHAR(20) NOT NULL DEFAULT 'video'",
+        "content_id": "VARCHAR(255)",
+        "content_url": "TEXT",
+    }
+    missing = [(name, definition) for name, definition in additions.items() if name not in existing]
+
+    with engine.begin() as connection:
+        for name, definition in missing:
+            connection.execute(text(f"ALTER TABLE analyses ADD COLUMN {name} {definition}"))
+        connection.execute(
+            text(
+                "UPDATE analyses SET "
+                "platform = COALESCE(NULLIF(platform, ''), 'youtube'), "
+                "content_type = COALESCE(NULLIF(content_type, ''), 'video'), "
+                "content_id = COALESCE(NULLIF(content_id, ''), video_id), "
+                "content_url = COALESCE(NULLIF(content_url, ''), video_url)"
+            )
+        )
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_analyses_platform ON analyses (platform)")
+        )
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_analyses_content_id ON analyses (content_id)")
+        )
+
+
 def ensure_user_profile_columns():
     """Add profile fields without requiring existing Docker data to be reset."""
     existing = {column["name"] for column in inspect(engine).get_columns("users")}

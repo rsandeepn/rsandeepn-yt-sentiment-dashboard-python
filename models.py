@@ -48,6 +48,14 @@ class Analysis(Base):
     )
     video_id: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
     video_url: Mapped[str] = mapped_column(Text, nullable=False)
+    platform: Mapped[str] = mapped_column(
+        String(20), index=True, nullable=False, default="youtube"
+    )
+    content_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="video"
+    )
+    content_id: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    content_url: Mapped[str] = mapped_column(Text, nullable=False)
     result: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
     progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -64,6 +72,16 @@ class Analysis(Base):
     @property
     def video_title(self) -> str | None:
         """Read the title from the saved result without adding a database column."""
+        return self.content_title
+
+    @property
+    def content_title(self) -> str | None:
+        """Read a platform-neutral content title from the saved analysis result."""
+        content = self.result.get("content") if isinstance(self.result, dict) else None
+        title = content.get("title") if isinstance(content, dict) else None
+        if isinstance(title, str) and title.strip():
+            return title.strip()
+
         video = self.result.get("video") if isinstance(self.result, dict) else None
         title = video.get("title") if isinstance(video, dict) else None
         return title.strip() if isinstance(title, str) and title.strip() else None

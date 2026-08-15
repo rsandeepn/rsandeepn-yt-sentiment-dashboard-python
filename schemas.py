@@ -72,6 +72,11 @@ class AnalysisHistoryItem(BaseModel):
     video_id: str
     video_title: str | None
     video_url: str
+    platform: str
+    content_type: str
+    content_id: str
+    content_title: str | None
+    content_url: str
     status: str
     progress: int
     status_message: str | None

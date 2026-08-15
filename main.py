@@ -3,6 +3,7 @@ import math
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,6 +29,7 @@ from database import (
     SessionLocal,
     engine,
     ensure_analysis_job_columns,
+    ensure_analysis_source_columns,
     ensure_user_profile_columns,
     ensure_user_security_columns,
     get_db,
@@ -75,6 +77,7 @@ async def lifespan(_app: FastAPI):
     jwt_secret()
     Base.metadata.create_all(bind=engine)
     ensure_analysis_job_columns()
+    ensure_analysis_source_columns()
     ensure_user_profile_columns()
     ensure_user_security_columns()
     with SessionLocal() as db:
@@ -92,7 +95,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="YouTube Sentiment API", lifespan=lifespan)
+app = FastAPI(title="CommentScope API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -104,6 +107,7 @@ app.add_middleware(
 
 class AnalyzeRequest(BaseModel):
     url: str
+    platform: Literal["youtube", "instagram"] = "youtube"
     force: bool = False
 
 
@@ -359,6 +363,15 @@ def create_or_reuse_analysis(
     db: Session,
     background_tasks: BackgroundTasks,
 ) -> Analysis:
+    if req.platform == "instagram":
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=(
+                "Instagram analysis requires a connected Instagram Professional "
+                "account and is not enabled yet."
+            ),
+        )
+
     video_id = extract_video_id(req.url)
     if not video_id:
         raise HTTPException(status_code=400, detail="Enter a valid YouTube video URL.")
@@ -368,6 +381,7 @@ def create_or_reuse_analysis(
             select(Analysis)
             .where(
                 Analysis.user_id == user.id,
+                Analysis.platform == req.platform,
                 Analysis.video_id == video_id,
                 Analysis.status.in_(["queued", "running", "completed"]),
             )
@@ -380,6 +394,10 @@ def create_or_reuse_analysis(
         user_id=user.id,
         video_id=video_id,
         video_url=req.url.strip(),
+        platform=req.platform,
+        content_type="video",
+        content_id=video_id,
+        content_url=req.url.strip(),
         result={},
         status="queued",
         progress=0,
@@ -424,6 +442,7 @@ def analyze_compatibility(
 def analysis_history(
     search: str = "",
     job_status: str = Query("all", alias="status"),
+    platform: Literal["all", "youtube", "instagram"] = Query("all"),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=50),
     user: User = Depends(get_current_user),
@@ -435,9 +454,18 @@ def analysis_history(
     filters = [Analysis.user_id == user.id]
     if search.strip():
         term = f"%{search.strip()}%"
-        filters.append(or_(Analysis.video_id.ilike(term), Analysis.video_url.ilike(term)))
+        filters.append(
+            or_(
+                Analysis.content_id.ilike(term),
+                Analysis.content_url.ilike(term),
+                Analysis.video_id.ilike(term),
+                Analysis.video_url.ilike(term),
+            )
+        )
     if job_status != "all":
         filters.append(Analysis.status == job_status)
+    if platform != "all":
+        filters.append(Analysis.platform == platform)
 
     total = db.scalar(select(func.count()).select_from(Analysis).where(*filters)) or 0
     items = db.scalars(
@@ -511,7 +539,14 @@ def reanalyze(
     if analysis is None:
         raise HTTPException(status_code=404, detail="Analysis not found.")
     return create_or_reuse_analysis(
-        AnalyzeRequest(url=analysis.video_url, force=True), user, db, background_tasks
+        AnalyzeRequest(
+            url=analysis.content_url,
+            platform=analysis.platform,
+            force=True,
+        ),
+        user,
+        db,
+        background_tasks,
     )
 
 

@@ -222,8 +222,16 @@ class AuthApiTests(unittest.TestCase):
         self.assertEqual(history.status_code, 200)
         self.assertEqual(history.json()["total"], 1)
         self.assertEqual(history.json()["items"][0]["video_id"], "q9rt-hDD4AY")
+        self.assertEqual(history.json()["items"][0]["platform"], "youtube")
+        self.assertEqual(history.json()["items"][0]["content_type"], "video")
+        self.assertEqual(history.json()["items"][0]["content_id"], "q9rt-hDD4AY")
+        self.assertEqual(history.json()["items"][0]["content_url"], url)
         self.assertEqual(
             history.json()["items"][0]["video_title"],
+            "Filmymoji Middle Class Madhu Kotha AC MCM",
+        )
+        self.assertEqual(
+            history.json()["items"][0]["content_title"],
             "Filmymoji Middle Class Madhu Kotha AC MCM",
         )
 
@@ -232,6 +240,44 @@ class AuthApiTests(unittest.TestCase):
         )
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["result"]["stats"]["total"], 1)
+
+    def test_instagram_platform_is_reserved_until_account_connection_is_available(self):
+        token = self.register().json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        response = self.client.post(
+            "/analyses",
+            json={
+                "url": "https://www.instagram.com/reel/example/",
+                "platform": "instagram",
+            },
+            headers=headers,
+        )
+
+        self.assertEqual(response.status_code, 501)
+        self.assertIn("Professional account", response.json()["detail"])
+        self.assertEqual(self.client.get("/analyses", headers=headers).json()["total"], 0)
+
+    def test_history_supports_platform_filtering(self):
+        token = self.register().json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        self.client.post(
+            "/analyses",
+            json={"url": "https://youtu.be/q9rt-hDD4AY"},
+            headers=headers,
+        )
+
+        youtube = self.client.get(
+            "/analyses", params={"platform": "youtube"}, headers=headers
+        )
+        instagram = self.client.get(
+            "/analyses", params={"platform": "instagram"}, headers=headers
+        )
+
+        self.assertEqual(youtube.status_code, 200)
+        self.assertEqual(youtube.json()["total"], 1)
+        self.assertEqual(instagram.status_code, 200)
+        self.assertEqual(instagram.json()["total"], 0)
 
     def test_users_cannot_read_each_others_history(self):
         first_token = self.register("first@example.com").json()["access_token"]
